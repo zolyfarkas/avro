@@ -17,6 +17,12 @@
  */
 package org.apache.avro;
 
+import java.io.IOException;
+import java.util.function.Function;
+
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonNode;
+
 /**
  * Resolves schemas by an external id, and provides the id for a schema, so
  * schemas can be referenced by id instead of by name or by full definition.
@@ -60,6 +66,45 @@ public interface SchemaResolver {
    */
   default String getJsonAttrName() {
     return "$ref";
+  }
+
+  /**
+   * Write {@code schema} in a custom reference form. The default
+   * implementation writes {@code {"<attr>": "<id>"}} when {@link #getId}
+   * returns a non-null id for the schema, and writes nothing otherwise.
+   *
+   * @return {@code true} if this method wrote the schema (as a reference),
+   *         {@code false} to let the caller write the full definition
+   */
+  default boolean customWrite(Schema schema, JsonGenerator gen) throws IOException {
+    String ref = getId(schema);
+    if (ref != null) {
+      gen.writeStartObject();
+      gen.writeFieldName(getJsonAttrName());
+      gen.writeString(ref);
+      gen.writeEndObject();
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  /**
+   * Read a schema from an object node in a custom way. {@code object} looks
+   * up attributes of the node by name (returning {@code null} for absent
+   * ones). The default implementation resolves the node through
+   * {@link #resolveSchema(String)} when it carries the reference attribute.
+   *
+   * @return the schema for this node, or {@code null} if this resolver does
+   *         not claim the node (the caller then parses it normally)
+   */
+  default Schema customRead(Function<String, JsonNode> object) {
+    JsonNode refVal = object.apply(getJsonAttrName());
+    if (refVal != null) {
+      return resolveSchema(refVal.asText());
+    } else {
+      return null;
+    }
   }
 
   /** A resolver that resolves nothing and assigns no ids. */

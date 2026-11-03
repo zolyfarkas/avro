@@ -903,14 +903,8 @@ public abstract class Schema extends JsonProperties implements Serializable {
           return true;
         }
         SchemaResolver resolver = WRITE_RESOLVER.get();
-        if (resolver != null) {
-          String ref = resolver.getId(this);
-          if (ref != null) {
-            gen.writeStartObject();
-            gen.writeStringField(resolver.getJsonAttrName(), ref);
-            gen.writeEndObject();
-            return true;
-          }
+        if (resolver != null && resolver.customWrite(this, gen)) {
+          return true;
         }
       }
       return false;
@@ -1903,11 +1897,10 @@ public abstract class Schema extends JsonProperties implements Serializable {
     } else if (schema.isObject()) {
       SchemaResolver resolver = context.getSchemaResolver();
       if (resolver != null) {
-        JsonNode ref = schema.get(resolver.getJsonAttrName());
-        if (ref != null) {
-          Schema resolved = resolver.resolveSchema(ref.asText());
-          registerResolved(context, resolved);
-          return resolved;
+        Schema custom = resolver.customRead(schema::get);
+        if (custom != null) {
+          registerResolved(context, custom);
+          return custom;
         }
       }
       String type = getRequiredText(schema, "type", "No type");

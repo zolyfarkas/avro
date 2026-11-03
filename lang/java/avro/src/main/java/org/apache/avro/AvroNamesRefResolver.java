@@ -17,6 +17,12 @@
  */
 package org.apache.avro;
 
+import java.io.IOException;
+import java.util.function.Function;
+
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonNode;
+
 /**
  * A {@link SchemaResolver} that delegates all resolution to a wrapped
  * resolver. In the fork this class extended {@code Schema.Names} so it could
@@ -45,6 +51,16 @@ public final class AvroNamesRefResolver implements SchemaResolver {
   @Override
   public String getJsonAttrName() {
     return sResolver.getJsonAttrName();
+  }
+
+  @Override
+  public boolean customWrite(Schema schema, JsonGenerator gen) throws IOException {
+    return sResolver.customWrite(schema, gen);
+  }
+
+  @Override
+  public Schema customRead(Function<String, JsonNode> object) {
+    return sResolver.customRead(object);
   }
 
   @Override

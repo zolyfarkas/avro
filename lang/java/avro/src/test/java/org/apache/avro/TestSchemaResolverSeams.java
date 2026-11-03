@@ -94,6 +94,52 @@ public class TestSchemaResolverSeams {
   }
 
   @Test
+  public void testCustomReadWriteHooksFire() throws IOException {
+    // A resolver that ignores getId/$ref entirely and uses its own wire
+    // form through the customRead/customWrite hooks (the d5c248b9f shape).
+    Schema recSchema = SchemaBuilder.record("TestRecord").fields().nullableLong("number", 0L).endRecord();
+    Schema schema = SchemaBuilder.array().items(recSchema);
+    SchemaResolver resolver = new SchemaResolver() {
+      @Override
+      public Schema resolveSchema(String id) {
+        throw new UnsupportedOperationException("custom hooks only");
+      }
+
+      @Override
+      public String getId(Schema s) {
+        return null;
+      }
+
+      @Override
+      public boolean customWrite(Schema s, com.fasterxml.jackson.core.JsonGenerator gen) throws IOException {
+        if (s.equals(recSchema)) {
+          gen.writeStartObject();
+          gen.writeStringField("$id", "theRecord");
+          gen.writeEndObject();
+          return true;
+        }
+        return false;
+      }
+
+      @Override
+      public Schema customRead(java.util.function.Function<String, com.fasterxml.jackson.databind.JsonNode> object) {
+        com.fasterxml.jackson.databind.JsonNode id = object.apply("$id");
+        if (id != null && "theRecord".equals(id.asText())) {
+          return recSchema;
+        }
+        return null;
+      }
+    };
+    StringWriter writer = new StringWriter();
+    JsonGenerator gen = Schema.FACTORY.createGenerator(writer);
+    schema.toJson(resolver, gen);
+    gen.flush();
+    assertEquals("{\"type\":\"array\",\"items\":{\"$id\":\"theRecord\"}}", writer.toString());
+    Schema result = new Schema.Parser().setSchemaResolver(resolver).parse(writer.toString());
+    assertEquals(schema, result);
+  }
+
+  @Test
   public void testTopLevelRefResolves() {
     Schema recSchema = SchemaBuilder.record("TestRecord").fields().nullableLong("number", 0L).endRecord();
     SchemaResolver resolver = new SchemaResolver() {
