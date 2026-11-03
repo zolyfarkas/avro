@@ -31,11 +31,6 @@ public class SnappyCodec extends Codec {
   private final CRC32 crc32 = new CRC32();
 
   static class Option extends CodecFactory {
-    static {
-      // if snappy isn't available, this will throw an exception which we
-      // can catch so we can avoid registering this codec
-      Snappy.getNativeLibraryVersion();
-    }
 
     @Override
     protected Codec createInstance() {
