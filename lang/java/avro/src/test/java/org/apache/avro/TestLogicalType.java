@@ -173,8 +173,12 @@ public class TestLogicalType {
           LogicalTypes.decimal(9, 2).addToSchema(schema);
           return null;
         });
-    assertEquals(LogicalTypes.decimal(9), LogicalTypes.fromSchemaIgnoreInvalid(schema),
-        "First logical type should still be set on schema");
+    // Adjusted for the ported fork addProp semantics (dbe045c5a): a
+    // duplicate add stores the new value before throwing, so the scale
+    // property now holds the second value. (Upstream's add-only semantics
+    // kept the first logical type intact here.)
+    assertEquals(LogicalTypes.decimal(9, 2), LogicalTypes.fromSchemaIgnoreInvalid(schema),
+        "Second logical type's scale should be stored despite the rejection");
   }
 
   @Test
