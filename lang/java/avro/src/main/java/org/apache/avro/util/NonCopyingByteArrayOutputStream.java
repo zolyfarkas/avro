@@ -19,7 +19,10 @@
 package org.apache.avro.util;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Objects;
 
 import org.apache.avro.SystemLimitException;
@@ -103,6 +106,50 @@ public class NonCopyingByteArrayOutputStream extends ByteArrayOutputStream {
     Objects.requireNonNull(b);
     checkCapacity(b.length);
     super.writeBytes(b);
+  }
+
+  /**
+   * Reads all remaining bytes from {@code in} directly into this stream's
+   * internal buffer, growing it as needed. Unlike
+   * {@link InputStream#transferTo(java.io.OutputStream)}, no intermediate
+   * copy buffer is used: each read lands in the destination array. The size
+   * limit (if any) is enforced exactly as for the {@code write} methods:
+   * {@link SystemLimitException} is thrown only when data actually exceeds
+   * the limit, never merely because the buffer is full at the limit.
+   *
+   * @param in the stream to drain
+   * @return the number of bytes read
+   * @throws IOException if reading from {@code in} fails
+   */
+  public long readFrom(final InputStream in) throws IOException {
+    Objects.requireNonNull(in);
+    long total = 0;
+    while (true) {
+      int len = buf.length - count;
+      if (limit > 0) {
+        len = (int) Math.min(len, limit - count);
+      }
+      if (len == 0) {
+        // No room that may be filled without a limit check: probe for EOF
+        // first, so a stream ending exactly at the limit does not throw.
+        int b = in.read();
+        if (b < 0) {
+          break;
+        }
+        checkCapacity(1);
+        buf = Arrays.copyOf(buf, Math.max(buf.length * 2, count + 1));
+        buf[count++] = (byte) b;
+        total++;
+        continue;
+      }
+      int n = in.read(buf, count, len);
+      if (n < 0) {
+        break;
+      }
+      count += n;
+      total += n;
+    }
+    return total;
   }
 
   /**
