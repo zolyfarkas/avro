@@ -37,6 +37,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
 import java.io.Serializable;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -1498,6 +1499,15 @@ public abstract class Schema extends JsonProperties implements Serializable {
      * names known to this parser. The input stream stays open after the parsing.
      */
     public Schema parse(InputStream in) throws IOException {
+      JsonParser parser = FACTORY.createParser(in).disable(JsonParser.Feature.AUTO_CLOSE_SOURCE);
+      return parse(parser, true, true);
+    }
+
+    /**
+     * Parse a schema from the provided reader. If named, the schema is added to the
+     * names known to this parser. The reader stays open after the parsing.
+     */
+    public Schema parse(Reader in) throws IOException {
       JsonParser parser = FACTORY.createParser(in).disable(JsonParser.Feature.AUTO_CLOSE_SOURCE);
       return parse(parser, true, true);
     }
