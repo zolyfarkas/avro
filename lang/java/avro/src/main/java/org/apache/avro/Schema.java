@@ -312,6 +312,24 @@ public abstract class Schema extends JsonProperties implements Serializable {
     throw new AvroRuntimeException("Not an enum: " + this);
   }
 
+  /**
+   * If this is an enum, return the string symbol for the given symbol: the
+   * value the enum's {@code stringSymbols} property assigns to it, or the
+   * symbol itself when the property assigns none. Generated enums expose
+   * this as their {@code toString()} (see the compiler's enum template).
+   */
+  public String getEnumStringSymbol(String symbol) {
+    throw new AvroRuntimeException("Not an enum: " + this);
+  }
+
+  /**
+   * If this is an enum, return the string symbols of all its symbols, in
+   * symbol order (see {@link #getEnumStringSymbol(String)}).
+   */
+  public List<String> getEnumStringSymbols() {
+    throw new AvroRuntimeException("Not an enum: " + this);
+  }
+
   /** If this is an enum, return its default value. */
   public String getEnumDefault() {
     throw new AvroRuntimeException("Not an enum: " + this);
@@ -1154,6 +1172,32 @@ public abstract class Schema extends JsonProperties implements Serializable {
     @Override
     public List<String> getEnumSymbols() {
       return symbols;
+    }
+
+    @Override
+    public String getEnumStringSymbol(String symbol) {
+      // Computed from the stringSymbols property on demand (the fork reads
+      // the same property here; it additionally maintains a parallel list
+      // via an addProp override, which main's private addProp does not
+      // allow). The fork's parse-time validation of the property (unknown
+      // symbol / duplicate string value) is not reproduced.
+      @SuppressWarnings("unchecked")
+      Map<String, Object> strSymbols = (Map<String, Object>) getObjectProp("stringSymbols");
+      if (strSymbols == null) {
+        return symbol;
+      } else {
+        Object result = strSymbols.get(symbol);
+        return (result == null) ? symbol : result.toString();
+      }
+    }
+
+    @Override
+    public List<String> getEnumStringSymbols() {
+      List<String> result = new ArrayList<>(symbols.size());
+      for (String symbol : symbols) {
+        result.add(getEnumStringSymbol(symbol));
+      }
+      return Collections.unmodifiableList(result);
     }
 
     @Override

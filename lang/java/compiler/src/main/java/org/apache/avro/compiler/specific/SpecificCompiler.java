@@ -1127,6 +1127,53 @@ public class SpecificCompiler {
   }
 
   /**
+   * Utility for template use. Fully escapes a string for use as a Java string
+   * literal: quotes, backslashes, the named control escapes, and any other
+   * character outside printable ASCII as a unicode escape. Used by the enum
+   * template for enum string symbols, whose values are arbitrary strings
+   * (unlike {@link #escapeForJavaString(String)}, which only handles quotes
+   * and backslashes and would emit invalid literals for control characters).
+   * This replaces the commons-lang {@code StringEscapeUtils.escapeJava} the
+   * fork's compiler used; commons-lang is not an upstream dependency.
+   */
+  public static String escapeJava(String o) {
+    StringBuilder b = new StringBuilder(o.length());
+    for (int i = 0; i < o.length(); i++) {
+      char c = o.charAt(i);
+      switch (c) {
+      case '"':
+        b.append("\\\"");
+        break;
+      case '\\':
+        b.append("\\\\");
+        break;
+      case '\b':
+        b.append("\\b");
+        break;
+      case '\t':
+        b.append("\\t");
+        break;
+      case '\n':
+        b.append("\\n");
+        break;
+      case '\f':
+        b.append("\\f");
+        break;
+      case '\r':
+        b.append("\\r");
+        break;
+      default:
+        if (c < 0x20 || c > 0x7e) {
+          b.append(String.format("\\u%04x", (int) c));
+        } else {
+          b.append(c);
+        }
+      }
+    }
+    return b.toString();
+  }
+
+  /**
    * Utility for template use. Escapes content emitted into a Javadoc comment.
    *
    * <p>
