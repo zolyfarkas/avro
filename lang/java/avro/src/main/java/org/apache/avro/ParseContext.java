@@ -91,6 +91,13 @@ public class ParseContext {
    * a schema that possibly contains unresolved references.
    */
   private SchemaResolver.ResolvingVisitor resolvingVisitor;
+  /**
+   * Optional external schema resolver (the {@code org.apache.avro} one, not the
+   * {@code org.apache.avro.util} name-reference helper imported above). When
+   * set, object nodes carrying its reference attribute are resolved through it
+   * during parsing. Null by default, which keeps parsing exactly upstream's.
+   */
+  private org.apache.avro.SchemaResolver schemaResolver;
 
   /**
    * Create a {@code ParseContext} for the default/{@code null} namespace, using
@@ -240,6 +247,25 @@ public class ParseContext {
     if (!result.isOK()) {
       throw new SchemaParseException(typeOfName + " \"" + name + "\" is invalid: " + result.getErrors());
     }
+  }
+
+  /**
+   * The external schema resolver consulted during parsing, or {@code null}
+   * when none is registered (the default; parsing is then exactly upstream
+   * behavior).
+   */
+  public org.apache.avro.SchemaResolver getSchemaResolver() {
+    return schemaResolver;
+  }
+
+  /**
+   * Register an external schema resolver: while parsing, an object node
+   * carrying the resolver's reference attribute (by default {@code "$ref"})
+   * is replaced by {@code resolver.resolveSchema(attributeValue)}. Pass
+   * {@code null} to unregister.
+   */
+  public void setSchemaResolver(org.apache.avro.SchemaResolver schemaResolver) {
+    this.schemaResolver = schemaResolver;
   }
 
   public boolean hasNewSchemas() {

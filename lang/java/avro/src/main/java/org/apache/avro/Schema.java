@@ -460,6 +460,39 @@ public abstract class Schema extends JsonProperties implements Serializable {
     }
   }
 
+  /**
+   * The resolver consulted by {@code NamedSchema.writeNameRef} while a schema
+   * is being written through {@link #toJson(SchemaResolver, JsonGenerator)}.
+   * Thread-local, following the pattern of {@link #VALIDATE_NAMES}: the
+   * recursive {@code toJson} plumbing carries no context parameter. Never set
+   * outside that method, so plain {@code toString}/{@code toJson} output is
+   * byte-for-byte upstream's.
+   */
+  private static final ThreadLocal<SchemaResolver> WRITE_RESOLVER = new ThreadLocal<>();
+
+  /**
+   * Render this schema as JSON, writing a reference object
+   * ({@code {"<attr>": "<id>"}}) instead of the definition for every named
+   * schema the resolver assigns an id to (see {@link SchemaResolver}). This
+   * is the write-side counterpart of registering the resolver on a
+   * {@link Parser}: documents written this way can be parsed back with the
+   * same resolver. With a resolver that assigns no ids, the output is
+   * identical to the plain rendering.
+   */
+  public void toJson(SchemaResolver resolver, JsonGenerator gen) throws IOException {
+    SchemaResolver saved = WRITE_RESOLVER.get();
+    WRITE_RESOLVER.set(resolver);
+    try {
+      toJson(new HashSet<>(), null, gen);
+    } finally {
+      if (saved == null) {
+        WRITE_RESOLVER.remove();
+      } else {
+        WRITE_RESOLVER.set(saved);
+      }
+    }
+  }
+
   @Deprecated
   void toJson(Set<String> knownNames, String namespace, JsonGenerator gen) throws IOException {
     if (!hasProps()) { // no props defined
@@ -868,6 +901,16 @@ public abstract class Schema extends JsonProperties implements Serializable {
         if (!knownNames.add(name.full)) {
           gen.writeString(name.getQualified(currentNamespace));
           return true;
+        }
+        SchemaResolver resolver = WRITE_RESOLVER.get();
+        if (resolver != null) {
+          String ref = resolver.getId(this);
+          if (ref != null) {
+            gen.writeStartObject();
+            gen.writeStringField(resolver.getJsonAttrName(), ref);
+            gen.writeEndObject();
+            return true;
+          }
         }
       }
       return false;
@@ -1481,6 +1524,23 @@ public abstract class Schema extends JsonProperties implements Serializable {
       return this;
     }
 
+    /**
+     * Register an external schema resolver with this parser's context: while
+     * parsing, an object node carrying the resolver's reference attribute (by
+     * default {@code "$ref"}) is replaced by the schema the resolver returns
+     * for the attribute value. With no resolver registered (the default),
+     * parsing is exactly upstream behavior.
+     */
+    public Parser setSchemaResolver(SchemaResolver resolver) {
+      context.setSchemaResolver(resolver);
+      return this;
+    }
+
+    /** The external schema resolver registered with this parser, if any. */
+    public SchemaResolver getSchemaResolver() {
+      return context.getSchemaResolver();
+    }
+
     /** True iff default values are validated. False by default. */
     public boolean getValidateDefaults() {
       return this.validateDefaults;
@@ -1841,6 +1901,15 @@ public abstract class Schema extends JsonProperties implements Serializable {
     } else if (schema.isTextual()) { // name
       return context.find(schema.textValue(), currentNameSpace);
     } else if (schema.isObject()) {
+      SchemaResolver resolver = context.getSchemaResolver();
+      if (resolver != null) {
+        JsonNode ref = schema.get(resolver.getJsonAttrName());
+        if (ref != null) {
+          Schema resolved = resolver.resolveSchema(ref.asText());
+          registerResolved(context, resolved);
+          return resolved;
+        }
+      }
       String type = getRequiredText(schema, "type", "No type");
       final boolean isTypeError = "error".equals(type);
       if (PRIMITIVES.containsKey(type)) { // primitive
@@ -1863,6 +1932,22 @@ public abstract class Schema extends JsonProperties implements Serializable {
       return parseUnion(schema, context, currentNameSpace);
     } else {
       throw new SchemaParseException("Schema not yet supported: " + schema);
+    }
+  }
+
+  /**
+   * Best-effort registration of a resolver-supplied schema in the parse
+   * context, so the context's end-of-parse resolution knows it. Only named
+   * schemas whose full name is not already known are registered; if the name
+   * is already known (to any schema), the resolver's schema is used for this
+   * node but not registered. The fork had no equivalent step (its parser had
+   * no separate resolve phase); this is an adaptation to main's
+   * ParseContext model.
+   */
+  private static void registerResolved(ParseContext context, Schema resolved) {
+    if (resolved != null && resolved instanceof NamedSchema
+        && context.getNamedSchema(resolved.getFullName()) == null) {
+      context.put(resolved);
     }
   }
 
