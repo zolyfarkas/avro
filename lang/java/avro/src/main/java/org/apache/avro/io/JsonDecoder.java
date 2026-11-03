@@ -46,12 +46,17 @@ import com.fasterxml.jackson.databind.util.TokenBuffer;
  * JsonDecoder is not thread-safe.
  */
 public class JsonDecoder extends ParsingDecoder implements Parser.ActionHandler {
-  private JsonParser in;
+  // Package-private (not private) so ExtendedJsonDecoder, in this package,
+  // can work with the parser directly; the same applies to ReorderBuffer,
+  // advance, error and readByteArray below, and to the JsonParser
+  // constructor. These widenings are the minimal seams the ExtendedJsonDecoder
+  // transplant needs; upstream's public API is unchanged.
+  JsonParser in;
   private static final JsonFactory JSON_FACTORY = new JsonFactory();
   Stack<ReorderBuffer> reorderBuffers = new Stack<>();
   ReorderBuffer currentReorderBuffer;
 
-  private static class ReorderBuffer {
+  static class ReorderBuffer {
     public Map<String, TokenBuffer> savedFields = new HashMap<>();
     public JsonParser origParser = null;
   }
@@ -72,6 +77,13 @@ public class JsonDecoder extends ParsingDecoder implements Parser.ActionHandler 
 
   JsonDecoder(Schema schema, String in) throws IOException {
     this(getSymbol(schema), in);
+  }
+
+  JsonDecoder(Schema schema, JsonParser in) throws IOException {
+    super(getSymbol(schema));
+    parser.reset();
+    this.in = in;
+    this.in.nextToken();
   }
 
   private static Symbol getSymbol(Schema schema) {
@@ -125,7 +137,7 @@ public class JsonDecoder extends ParsingDecoder implements Parser.ActionHandler 
     return this;
   }
 
-  private void advance(Symbol symbol) throws IOException {
+  void advance(Symbol symbol) throws IOException {
     this.parser.processTrailingImplicitActions();
     if (in.getCurrentToken() == null && this.parser.depth() == 1)
       throw new EOFException();
@@ -311,7 +323,7 @@ public class JsonDecoder extends ParsingDecoder implements Parser.ActionHandler 
     }
   }
 
-  private byte[] readByteArray() throws IOException {
+  byte[] readByteArray() throws IOException {
     return in.getText().getBytes(StandardCharsets.ISO_8859_1);
   }
 
@@ -564,7 +576,7 @@ public class JsonDecoder extends ParsingDecoder implements Parser.ActionHandler 
     return null;
   }
 
-  private AvroTypeException error(String type) {
+  AvroTypeException error(String type) {
     return new AvroTypeException("Expected " + type + ". Got " + in.getCurrentToken());
   }
 

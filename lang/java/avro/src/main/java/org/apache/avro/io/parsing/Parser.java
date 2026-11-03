@@ -184,4 +184,90 @@ public class Parser {
   public void reset() {
     pos = 1;
   }
+
+  // The stack-walking helpers below are used by ExtendedJsonDecoder to
+  // navigate the grammar when decoding values whose symbols it must consume
+  // itself (advanceBy). They mirror the fork's Parser additions verbatim.
+
+  /**
+   * Returns the symbol just above the current position (the one most recently
+   * consumed by {@link #countToFirstTerminal()} or {@link #countToEnd()}).
+   */
+  public Symbol lastSymbol() {
+    return stack[pos];
+  }
+
+  /**
+   * Counts the symbols up to and including the first terminal, expanding
+   * productions along the way. The stack position is left just past that
+   * terminal; {@link #goBack(int)} restores it.
+   */
+  public final int countToFirstTerminal() throws IOException {
+    int i = 1;
+    while (true) {
+      Symbol top = stack[--pos];
+      if (top.kind == Symbol.Kind.TERMINAL) {
+        return i;
+      } else if (top.production != null) {
+        pushProduction(top);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  /** Counts the symbols up to the end (root) of the current production. */
+  public final int countToEnd() throws IOException {
+    if (pos <= 0) {
+      return 0;
+    }
+    int i = 1;
+    while (pos > 0) {
+      Symbol top = stack[--pos];
+      if (top.kind == Symbol.Kind.ROOT) {
+        break;
+      }
+      if (top.production != null) {
+        pushProduction(top);
+      } else {
+        i++;
+      }
+    }
+    return i;
+  }
+
+  /** Moves the stack position back by {@code count} symbols. */
+  public final void goBack(final int count) {
+    pos += count;
+  }
+
+  /**
+   * Advances over {@code nrToAdvance} symbols, performing implicit actions
+   * encountered along the way.
+   */
+  public final void advance(int nrToAdvance) throws IOException {
+    while (nrToAdvance > 0) {
+      Symbol top = stack[--pos];
+      if (top.kind == Symbol.Kind.IMPLICIT_ACTION) {
+        symbolHandler.doAction(null, top);
+        nrToAdvance--;
+      } else if (top.production != null) {
+        pushProduction(top);
+      } else {
+        nrToAdvance--;
+      }
+    }
+  }
+
+  /** Skips {@code nrToSkip} symbols without performing implicit actions. */
+  public final void skip(int nrToSkip) throws IOException {
+    while (nrToSkip > 0) {
+      Symbol top = stack[--pos];
+      if (top.production != null) {
+        pushProduction(top);
+      } else {
+        nrToSkip--;
+      }
+    }
+  }
 }

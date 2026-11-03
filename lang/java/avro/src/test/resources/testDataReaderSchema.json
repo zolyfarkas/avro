@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "TestRecord",
+  "namespace": "testNamespace",
+  "fields": [{
+      "name": "id",
+      "type": "long"
+    }, {
+      "name": "field",
+      "type": "long"
+    }, {
+      "name": "someMap",
+      "type": {
+        "type": "map",
+        "values": "long",
+        "avro.java.string": "String"
+      }
+    }, {
+      "name": "someField",
+      "type": {
+        "type": "string",
+        "avro.java.string": "String"
+      },
+      "default" : "caca"
+    }]
+}

@@ -25,6 +25,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.DoubleNode;
 import com.fasterxml.jackson.databind.node.NullNode;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.io.ExtendedJsonDecoder;
 import org.apache.avro.path.TracingAvroTypeException;
 import org.apache.avro.util.internal.Accessor;
 import org.apache.avro.util.internal.Accessor.FieldAccessor;
@@ -40,6 +42,7 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.Serializable;
 import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -692,7 +695,11 @@ public abstract class Schema extends JsonProperties implements Serializable {
       return defaultValue != null;
     }
 
-    JsonNode defaultValue() {
+    // Public ( widened from package-private) so grammar generators outside
+    // this package can carry the default into FieldAdjustAction symbols for
+    // ExtendedJsonDecoder's default injection; the fork's Field has it
+    // public as well.
+    public JsonNode defaultValue() {
       return defaultValue;
     }
 
@@ -1782,11 +1789,123 @@ public abstract class Schema extends JsonProperties implements Serializable {
   private static final ThreadLocal<Boolean> VALIDATE_DEFAULTS = ThreadLocalWithInitial.of(() -> true);
 
   private static JsonNode validateDefault(String fieldName, Schema schema, JsonNode defaultValue) {
-    if (VALIDATE_DEFAULTS.get() && (defaultValue != null) && !schema.isValidDefault(defaultValue)) { // invalid default
-      String message = "Invalid default for field " + fieldName + ": " + defaultValue + " not a " + schema;
-      throw new AvroTypeException(message); // throw exception
+    if (VALIDATE_DEFAULTS.get() && defaultValue != null) {
+      try {
+        validateDefault(schema, defaultValue);
+      } catch (RuntimeException e) {
+        throw new AvroTypeException(
+            "Invalid default for field " + fieldName + ": " + defaultValue + " not a " + schema, e);
+      }
     }
     return defaultValue;
+  }
+
+  /**
+   * The fork's exception-throwing default validation (replacing upstream's
+   * purely structural boolean check): a schema with a logical type is
+   * validated by actually decoding the default with
+   * {@link org.apache.avro.io.ExtendedJsonDecoder} and a
+   * {@link org.apache.avro.generic.GenericDatumReader}; other schemas are
+   * checked structurally, throwing {@link AvroTypeException} with a specific
+   * message instead of returning false. Only {@link IOException} from the
+   * decode is wrapped (as {@link java.io.UncheckedIOException}); any
+   * {@link RuntimeException} propagates to the caller.
+   */
+  /** Decode a default value with the extended JSON decoder (the fork's
+   * logical-type validation): succeeds iff the value decodes against the
+   * schema. */
+  private static void decodeDefault(Schema schema, JsonNode defaultValue) throws IOException {
+    ExtendedJsonDecoder dec = new ExtendedJsonDecoder(schema, defaultValue.toString());
+    GenericDatumReader<?> reader = new GenericDatumReader<>(schema);
+    reader.read(null, dec);
+  }
+
+  private static void validateDefault(Schema schema, JsonNode defaultValue) {
+    if (defaultValue == null) {
+      // The fork reaches this only via a record default missing a field that
+      // itself has no default, and fails with an NPE from the checks below;
+      // fail with a meaningful exception instead (same net outcome: the
+      // enclosing field's default is rejected).
+      throw new AvroTypeException("Missing default value for " + schema);
+    }
+    LogicalType lType = schema.getLogicalType();
+    if (lType != null) {
+      try {
+        decodeDefault(schema, defaultValue);
+        return;
+      } catch (IOException ex) {
+        throw new UncheckedIOException(ex);
+      }
+    }
+    switch (schema.getType()) {
+    case STRING:
+    case BYTES:
+    case ENUM:
+    case FIXED:
+      if (!defaultValue.isTextual()) {
+        throw new AvroTypeException("Default value must be textual");
+      }
+      break;
+    case INT:
+      // Deviation from the fork, which checks isNumber() only: upstream's
+      // integral-and-in-range check is kept (upstream's TestSchema pins it
+      // for Field construction).
+      if (!defaultValue.isIntegralNumber() || !defaultValue.canConvertToInt()) {
+        throw new AvroTypeException("Default value must be number");
+      }
+      break;
+    case LONG:
+      if (!defaultValue.isIntegralNumber() || !defaultValue.canConvertToLong()) {
+        throw new AvroTypeException("Default value must be number");
+      }
+      break;
+    case FLOAT:
+    case DOUBLE:
+      if (!defaultValue.isNumber()) {
+        throw new AvroTypeException("Default value must be number");
+      }
+      break;
+    case BOOLEAN:
+      if (!defaultValue.isBoolean()) {
+        throw new AvroTypeException("Default value must be boolean");
+      }
+      break;
+    case NULL:
+      if (!defaultValue.isNull()) {
+        throw new AvroTypeException("Default value must be null");
+      }
+      break;
+    case ARRAY:
+      if (!defaultValue.isArray()) {
+        throw new AvroTypeException("Default value must be array");
+      }
+      for (JsonNode element : defaultValue) {
+        validateDefault(schema.getElementType(), element);
+      }
+      break;
+    case MAP:
+      if (!defaultValue.isObject()) {
+        throw new AvroTypeException("Default value must be object");
+      }
+      for (JsonNode value : defaultValue) {
+        validateDefault(schema.getValueType(), value);
+      }
+      break;
+    case UNION: // union default: first branch
+      validateDefault(schema.getTypes().get(0), defaultValue);
+      break;
+    case RECORD:
+      if (!defaultValue.isObject()) {
+        throw new AvroTypeException("Default value must be object");
+      }
+      for (Field field : schema.getFields()) {
+        validateDefault(field.schema(),
+            defaultValue.has(field.name()) ? defaultValue.get(field.name()) : field.defaultValue());
+      }
+      break;
+    default:
+      throw new IllegalStateException("Unsupported schema type: " + schema);
+    }
   }
 
   /*
@@ -1818,6 +1937,21 @@ public abstract class Schema extends JsonProperties implements Serializable {
   private static boolean isValidDefault(Schema schema, JsonNode defaultValue) {
     if (defaultValue == null)
       return false;
+    LogicalType lType = schema.getLogicalType();
+    if (lType != null) {
+      // The fork's decode-based check for logical-typed schemas: the default
+      // is valid iff it actually decodes. (In the fork this branch sat in
+      // this boolean method before ee5e5ef94 restructured validation; the
+      // exception-throwing validateDefault above shares the decode.)
+      try {
+        decodeDefault(schema, defaultValue);
+        return true;
+      } catch (IOException ex) {
+        throw new UncheckedIOException(ex);
+      } catch (AvroRuntimeException e) {
+        return false;
+      }
+    }
     switch (schema.getType()) {
     case STRING:
     case BYTES:

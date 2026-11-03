@@ -29,6 +29,8 @@ import java.util.Set;
 import org.apache.avro.AvroTypeException;
 import org.apache.avro.Schema;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 /**
  * Symbol is the base of all symbols (terminals and non-terminals) of the
  * grammar.
@@ -588,15 +590,32 @@ public abstract class Symbol {
     return new FieldAdjustAction(rindex, fname, aliases);
   }
 
+  public static FieldAdjustAction fieldAdjustAction(int rindex, String fname, JsonNode defaultValue,
+      Set<String> aliases) {
+    return new FieldAdjustAction(rindex, fname, defaultValue, aliases);
+  }
+
   public static class FieldAdjustAction extends ImplicitAction {
     public final int rindex;
     public final String fname;
+    /**
+     * The field's default value, or {@code null} when the grammar carries
+     * none. Only JSON grammars (see JsonGrammarGenerator) populate this; it
+     * lets ExtendedJsonDecoder inject the default when a field is absent.
+     * Other decoders ignore it.
+     */
+    public final JsonNode defaultValue;
     public final Set<String> aliases;
 
     @Deprecated
     public FieldAdjustAction(int rindex, String fname, Set<String> aliases) {
+      this(rindex, fname, null, aliases);
+    }
+
+    public FieldAdjustAction(int rindex, String fname, JsonNode defaultValue, Set<String> aliases) {
       this.rindex = rindex;
       this.fname = fname;
+      this.defaultValue = defaultValue;
       this.aliases = aliases;
     }
   }

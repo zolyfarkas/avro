@@ -1,0 +1,17 @@
+{
+  "id": 101877697,
+  "field": 245973897,
+  "someMap": {
+    "A": 1,
+    "B": 1,
+    "C": 1    
+  },
+  "someFieldX" : "test",
+  "previous" : {
+      "id": 1018776,
+      "field": 2459738,
+      "someMap": {},
+      "someFieldX" : "test",
+      "someField" : "cucu"
+  }
+}
