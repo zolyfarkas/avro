@@ -81,6 +81,40 @@ public class TestValidateDefault {
   }
 
   @Test
+  public void testIsValidDefaultWidenedCatch() throws Exception {
+    // A logical-type conversion that fails with a plain RuntimeException
+    // (not an AvroRuntimeException): with the fork's 1059a43e1 widening,
+    // isValidDefault reports the default invalid instead of propagating.
+    LogicalType lt = new LogicalType("widening-test-lt") {
+    };
+    Schema schema = Schema.create(Schema.Type.STRING);
+    lt.addToSchema(schema);
+    org.apache.avro.Conversion<String> conversion = new org.apache.avro.Conversion<String>() {
+      @Override
+      public Class<String> getConvertedType() {
+        return String.class;
+      }
+
+      @Override
+      public String getLogicalTypeName() {
+        return "widening-test-lt";
+      }
+
+      @Override
+      public String fromCharSequence(CharSequence value, Schema schema, LogicalType type) {
+        throw new IllegalStateException("conversion boom");
+      }
+
+      @Override
+      public CharSequence toCharSequence(String value, Schema schema, LogicalType type) {
+        return value;
+      }
+    };
+    org.apache.avro.generic.GenericData.get().addLogicalTypeConversion(conversion);
+    assertFalse(schema.isValidDefault(Schema.MAPPER.readTree("\"x\"")));
+  }
+
+  @Test
   public void testIsValidDefaultBasics() throws Exception {
     Schema stringSchema = Schema.create(Schema.Type.STRING);
     assertTrue(stringSchema.isValidDefault(Schema.MAPPER.readTree("\"x\"")));

@@ -1948,7 +1948,10 @@ public abstract class Schema extends JsonProperties implements Serializable {
         return true;
       } catch (IOException ex) {
         throw new UncheckedIOException(ex);
-      } catch (AvroRuntimeException e) {
+      } catch (RuntimeException e) {
+        // Widened from AvroRuntimeException (the fork's 1059a43e1): a
+        // conversion or decoder failure of any RuntimeException kind means
+        // the default does not decode, hence is not valid.
         return false;
       }
     }
