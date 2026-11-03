@@ -97,7 +97,11 @@ public class ZstandardCodec extends Codec {
   /**
    * Initial capacity for the decompression buffer: the frame's content size
    * when the frame header carries one, so the common case needs no growth
-   * copies at all; the fixed default otherwise.
+   * copies at all. When the content size is unknown, fall back to twice the
+   * compressed size (the fork's final-form heuristic, from its b21bbf94e),
+   * replacing the fixed 8 KiB start that forced repeated growth copies on
+   * larger payloads. The capacity-limited factory caps the result at the
+   * decompression limit.
    */
   private static int initialDecompressCapacity(ByteBuffer compressedData) {
     long contentSize = Zstd.getFrameContentSize(compressedData.array(), computeOffset(compressedData),
@@ -105,7 +109,8 @@ public class ZstandardCodec extends Codec {
     if (contentSize > 0) {
       return (int) Math.min(contentSize, Integer.MAX_VALUE);
     }
-    return DEFAULT_BUFFER_SIZE;
+    long guess = 2L * compressedData.remaining();
+    return (int) Math.max(Math.min(guess, Integer.MAX_VALUE), DEFAULT_BUFFER_SIZE);
   }
 
   @Override
