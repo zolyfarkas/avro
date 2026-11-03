@@ -678,8 +678,12 @@ public class GenericData {
   /** Renders a Java datum as <a href="https://www.json.org/">JSON</a>. */
   public String toString(Object datum) {
     StringBuilder buffer = new StringBuilder();
-    toString(datum, buffer, new IdentityHashMap<>(128));
-    return buffer.toString();
+    try {
+      toString(datum, buffer, new IdentityHashMap<>(128));
+      return buffer.toString();
+    } catch (StackOverflowError e) {
+      return "StackOverflowError for " + datum.getClass() + ": " + buffer.substring(0, 1024) + "...";
+    }
   }
 
   private static final String TOSTRING_CIRCULAR_REFERENCE_ERROR_TEXT = " \">>> CIRCULAR REFERENCE CANNOT BE PUT IN JSON STRING, ABORTING RECURSION <<<\" ";
