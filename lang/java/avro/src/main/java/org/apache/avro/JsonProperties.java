@@ -28,7 +28,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;
@@ -147,10 +146,10 @@ public abstract class JsonProperties {
   // the methods
   // we need. We don't ever remove anything so we don't need to implement the
   // clear/remove functionality.
-  // Also, we only ever ADD to the collection, never changing a value, so
-  // putWithAbsent is the
-  // only modifier
-  private final ConcurrentMap<String, JsonNode> props = new ConcurrentHashMap<>() {
+  // The only modifiers are putIfAbsent (via put) and putOverwriting, the latter
+  // backing the fork-compatible addProp semantics: a duplicate add stores the
+  // new value (at the key's original position) and then throws.
+  private static final class PropsMap extends ConcurrentHashMap<String, JsonNode> {
     private static final long serialVersionUID = 1L;
     private final Queue<MapEntry<String, JsonNode>> propOrder = new ConcurrentLinkedQueue<>();
 
@@ -166,6 +165,27 @@ public abstract class JsonProperties {
     @Override
     public JsonNode put(String key, JsonNode value) {
       return putIfAbsent(key, value);
+    }
+
+    /**
+     * Stores {@code value} for {@code key} unconditionally, updating the queued
+     * entry in place so the key keeps its original iteration position.
+     *
+     * @return the previously stored value, or {@code null} if there was none
+     */
+    JsonNode putOverwriting(String key, JsonNode value) {
+      JsonNode old = super.put(key, value);
+      if (old == null) {
+        propOrder.add(new MapEntry<>(key, value));
+      } else if (!old.equals(value)) {
+        for (MapEntry<String, JsonNode> entry : propOrder) {
+          if (entry.getKey().equals(key)) {
+            entry.setValue(value);
+            break;
+          }
+        }
+      }
+      return old;
     }
 
     @Override
@@ -194,7 +214,9 @@ public abstract class JsonProperties {
         }
       };
     }
-  };
+  }
+
+  private final PropsMap props = new PropsMap();
 
   private final Set<String> reserved;
 
@@ -290,9 +312,13 @@ public abstract class JsonProperties {
     if (value == null)
       throw new AvroRuntimeException("Can't set a property to null: " + name);
 
-    JsonNode old = props.putIfAbsent(name, value);
+    // Fork-compatible semantics, deviating from upstream's add-only design:
+    // the new value is stored before the exception is thrown, so a caller
+    // that catches the exception observes the new value.
+    JsonNode old = props.putOverwriting(name, value);
     if (old != null && !old.equals(value)) {
-      throw new AvroRuntimeException("Can't overwrite property: " + name);
+      throw new AvroRuntimeException(
+          "Can't overwrite property: " + name + " old = " + old + ", value = " + value + ", for " + this);
     }
   }
 
