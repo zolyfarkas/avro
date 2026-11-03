@@ -25,6 +25,8 @@ import java.nio.ByteBuffer;
 
 import org.apache.avro.util.NonCopyingByteArrayOutputStream;
 
+import com.github.luben.zstd.Zstd;
+
 public class ZstandardCodec extends Codec {
   public final static int DEFAULT_COMPRESSION = 3;
   public final static boolean DEFAULT_USE_BUFFERPOOL = false;
@@ -68,7 +70,12 @@ public class ZstandardCodec extends Codec {
 
   @Override
   public ByteBuffer compress(ByteBuffer data) throws IOException {
-    NonCopyingByteArrayOutputStream baos = new NonCopyingByteArrayOutputStream(DEFAULT_BUFFER_SIZE);
+    // Presize the output to the zstd frame bound so the buffer never grows
+    // (and copies) while the frame is written. The buffer is per-call: the
+    // fork's later shared-instance buffer (4d78e3d88) caused the aliasing
+    // its b21bbf94e had to fix, and is deliberately not reproduced.
+    int bound = (int) Math.min(Zstd.compressBound(data.remaining()), Integer.MAX_VALUE);
+    NonCopyingByteArrayOutputStream baos = new NonCopyingByteArrayOutputStream(Math.max(bound, 1));
     try (OutputStream outputStream = ZstandardLoader.output(baos, compressionLevel, useChecksum, useBufferPool)) {
       outputStream.write(data.array(), computeOffset(data), data.remaining());
     }
@@ -78,13 +85,27 @@ public class ZstandardCodec extends Codec {
   @Override
   public ByteBuffer decompress(ByteBuffer compressedData) throws IOException {
     NonCopyingByteArrayOutputStream baos = NonCopyingByteArrayOutputStream
-        .capacityLimitedOutputStream(DEFAULT_BUFFER_SIZE);
+        .capacityLimitedOutputStream(initialDecompressCapacity(compressedData));
     InputStream bytesIn = new ByteArrayInputStream(compressedData.array(), computeOffset(compressedData),
         compressedData.remaining());
     try (InputStream ios = ZstandardLoader.input(bytesIn, useBufferPool)) {
       baos.readFrom(ios);
     }
     return baos.asByteBuffer();
+  }
+
+  /**
+   * Initial capacity for the decompression buffer: the frame's content size
+   * when the frame header carries one, so the common case needs no growth
+   * copies at all; the fixed default otherwise.
+   */
+  private static int initialDecompressCapacity(ByteBuffer compressedData) {
+    long contentSize = Zstd.getFrameContentSize(compressedData.array(), computeOffset(compressedData),
+        compressedData.remaining());
+    if (contentSize > 0) {
+      return (int) Math.min(contentSize, Integer.MAX_VALUE);
+    }
+    return DEFAULT_BUFFER_SIZE;
   }
 
   @Override
