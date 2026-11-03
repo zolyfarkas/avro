@@ -72,12 +72,16 @@ public class TestValidateDefault {
   }
 
   @Test
-  public void testUnionDefaultMustMatchFirstBranch() {
-    // fork validates a union default against the first branch only;
-    // upstream's any-branch check accepted this
-    assertThrows(AvroTypeException.class,
-        () -> parseField("{\"name\":\"u\",\"type\":[\"string\",\"int\"],\"default\":5}"));
+  public void testUnionDefaultAnyBranch() {
+    // CHANGED EXPECTATION vs the fork: the fork validates a union default
+    // against the first branch only and would reject the int default here.
+    // Upstream's suite pins any-branch acceptance (ReflectData's nullable
+    // defaults, TestSchema.validValue), so the port validates any-branch.
+    parseField("{\"name\":\"u\",\"type\":[\"string\",\"int\"],\"default\":5}");
     parseField("{\"name\":\"u\",\"type\":[\"string\",\"int\"],\"default\":\"x\"}");
+    // a default matching no branch is still rejected
+    assertThrows(AvroTypeException.class,
+        () -> parseField("{\"name\":\"u\",\"type\":[\"string\",\"int\"],\"default\":true}"));
   }
 
   @Test

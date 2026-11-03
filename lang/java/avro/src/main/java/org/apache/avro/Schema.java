@@ -1924,7 +1924,7 @@ public abstract class Schema extends JsonProperties implements Serializable {
         throw new AvroTypeException("Default value must be array");
       }
       for (JsonNode element : defaultValue) {
-        validateDefault(schema.getElementType(), element);
+        validateValue(schema.getElementType(), element);
       }
       break;
     case MAP:
@@ -1932,23 +1932,111 @@ public abstract class Schema extends JsonProperties implements Serializable {
         throw new AvroTypeException("Default value must be object");
       }
       for (JsonNode value : defaultValue) {
-        validateDefault(schema.getValueType(), value);
+        validateValue(schema.getValueType(), value);
       }
       break;
-    case UNION: // union default: first branch
-      validateDefault(schema.getTypes().get(0), defaultValue);
+    case UNION: // union default: any branch (see validateValue for why the
+      // fork's first-branch rule is not used)
+      validateUnion(schema, defaultValue);
       break;
     case RECORD:
       if (!defaultValue.isObject()) {
         throw new AvroTypeException("Default value must be object");
       }
       for (Field field : schema.getFields()) {
-        validateDefault(field.schema(),
-            defaultValue.has(field.name()) ? defaultValue.get(field.name()) : field.defaultValue());
+        if (defaultValue.has(field.name())) {
+          validateValue(field.schema(), defaultValue.get(field.name()));
+        } else if (field.defaultValue() != null) {
+          validateDefault(field.schema(), field.defaultValue());
+        } else {
+          throw new AvroTypeException("Missing default value for field " + field.name() + " of " + schema);
+        }
       }
       break;
     default:
       throw new IllegalStateException("Unsupported schema type: " + schema);
+    }
+  }
+
+  /** Validates a value against a union schema: any branch may match. */
+  private static void validateUnion(Schema schema, JsonNode value) {
+    RuntimeException failure = null;
+    for (Schema branch : schema.getTypes()) {
+      try {
+        validateValue(branch, value);
+        return;
+      } catch (RuntimeException e) {
+        failure = e;
+      }
+    }
+    throw new AvroTypeException("Value " + value + " does not match any branch of " + schema, failure);
+  }
+
+  /**
+   * Validates a value nested inside a default (an array element, map value,
+   * or a field value present in a record default), as opposed to a field
+   * default itself. Structurally this walks the same rules as
+   * {@link #validateDefault(Schema, JsonNode)}; it exists because the fork's
+   * throwing validateDefault recursed into itself for nested values with a
+   * first-branch-only union rule, which rejects values upstream accepts —
+   * e.g. {@code {"value":15}} for a {@code ["null","long"]} field inside a
+   * record default (pinned by upstream's TestSchemaValidateDefault) and
+   * ReflectData's nullable-field defaults such as {@code ["null","int"]}
+   * with default {@code 1} (pinned by TestReflect). Union values and union
+   * field defaults are therefore both validated any-branch here, as
+   * upstream's boolean check does — a documented deviation from the fork.
+   */
+  private static void validateValue(Schema schema, JsonNode value) {
+    if (value == null) {
+      throw new AvroTypeException("Missing value for " + schema);
+    }
+    LogicalType lType = schema.getLogicalType();
+    if (lType != null) {
+      try {
+        decodeDefault(schema, value);
+        return;
+      } catch (IOException ex) {
+        throw new UncheckedIOException(ex);
+      }
+    }
+    switch (schema.getType()) {
+    case UNION:
+      validateUnion(schema, value);
+      break;
+    case ARRAY:
+      if (!value.isArray()) {
+        throw new AvroTypeException("Default value must be array");
+      }
+      for (JsonNode element : value) {
+        validateValue(schema.getElementType(), element);
+      }
+      break;
+    case MAP:
+      if (!value.isObject()) {
+        throw new AvroTypeException("Default value must be object");
+      }
+      for (JsonNode v : value) {
+        validateValue(schema.getValueType(), v);
+      }
+      break;
+    case RECORD:
+      if (!value.isObject()) {
+        throw new AvroTypeException("Default value must be object");
+      }
+      for (Field field : schema.getFields()) {
+        if (value.has(field.name())) {
+          validateValue(field.schema(), value.get(field.name()));
+        } else if (field.defaultValue() != null) {
+          validateDefault(field.schema(), field.defaultValue());
+        } else {
+          throw new AvroTypeException("Missing default value for field " + field.name() + " of " + schema);
+        }
+      }
+      break;
+    default:
+      // primitives and named leaf types: same checks as for a field default
+      validateDefault(schema, value);
+      break;
     }
   }
 
